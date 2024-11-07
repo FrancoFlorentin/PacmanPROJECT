@@ -19,6 +19,27 @@ sfVector2i mousePos;
 sfFloatRect playBounds;
 sfFloatRect exitBounds;
 
+#define CELL_SIZE 2
+#define ROWS 400
+#define COLS 300
+
+#define PACMAN_SPEED 0.015
+
+// Definir direcciones
+typedef enum {
+    NONE,
+    RIGHT,
+    LEFT,
+    UP,
+    DOWN
+} Direccion;
+
+// Inicializa la dirección actual y la próxima dirección
+Direccion direccion = NONE;
+Direccion proxima_direccion = NONE;
+
+// Mapa del juego
+int mapa[ROWS][COLS];
 
 int inGame;
 float scaleY, scaleX, scaleYMap, scaleXMap;
@@ -112,6 +133,8 @@ void loadButtons() {
   sfText_setPosition(exitText, (sfVector2f){windowSize.x / 2 - 95, 323});  // Posición del botón "Salir
 }
 
+
+
 void eventHandler(sfVector2i mousePos) {
   sfEvent event;
 
@@ -122,18 +145,28 @@ void eventHandler(sfVector2i mousePos) {
     // Manejar clics del mouse
     if (event.type == sfEvtMouseButtonPressed && event.mouseButton.button == sfMouseLeft) {
 
-      // Verificar si se hizo clic en el botón "Jugar"
-      playBounds = sfRectangleShape_getGlobalBounds(playButton);
-      if (sfFloatRect_contains(&playBounds, mousePos.x, mousePos.y)) {
-        printf("Boton 'Jugar' presionado\n");
-        inGame = 1;
+      // Verificar si esta en el menu
+      if (inGame == 0) {
+        // Verificar si se hizo clic en el botón "Jugar"
+        playBounds = sfRectangleShape_getGlobalBounds(playButton);
+        if (sfFloatRect_contains(&playBounds, mousePos.x, mousePos.y)) {
+          printf("Boton 'Jugar' presionado\n");
+          inGame = 1;
+        }
+
+        // Verificar si se hizo clic en el botón "Salir"
+        exitBounds = sfRectangleShape_getGlobalBounds(exitButton);
+        if (sfFloatRect_contains(&exitBounds, mousePos.x, mousePos.y)) {
+          sfRenderWindow_close(window);  // Cierra la ventana
+        }
       }
 
-      // Verificar si se hizo clic en el botón "Salir"
-      exitBounds = sfRectangleShape_getGlobalBounds(exitButton);
-      if (sfFloatRect_contains(&exitBounds, mousePos.x, mousePos.y)) {
-        sfRenderWindow_close(window);  // Cierra la ventana
+      if (event.type == sfEvtMouseButtonPressed) {
+          // Obtener la posición del mouse
+          sfVector2i mouse_position = sfMouse_getPositionRenderWindow(window);
+          printf("Posicion del mouse - x: %d, y: %d\n", mouse_position.x, mouse_position.y);
       }
+      
     }
   }
 }
@@ -156,9 +189,43 @@ void buttonsHover(sfVector2i mousePos) {
   }
 }
 
+int cargar_mapa(const char *nombre_archivo) {
+    FILE *archivo = fopen(nombre_archivo, "r");
+    if (archivo == NULL) {
+      perror("Error al abrir el archivo de mapa");
+      return 1;
+    }
+    printf("mapa cargado!");
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            int c = fgetc(archivo);
+            if (c == EOF) {
+                fprintf(stderr, "El archivo de mapa tiene menos celdas de las esperadas.\n");
+                return 1;
+            }
+            if (c == '0' || c == '1' || c == '8') {
+                mapa[i][j] = c - '0'; // Convierte el carácter a número
+            } else if (c == '\n') {
+                j--; // Ignora saltos de línea
+            } else {
+                fprintf(stderr, "Carácter inesperado en el archivo de mapa.\n");
+                return 1;
+            }
+        }
+    }
+
+    fclose(archivo);
+}
+
+// Función para verificar si una celda es un camino libre
+sfBool es_camino_libre(int x, int y) {
+    int celda_x = x / CELL_SIZE;
+    int celda_y = y / CELL_SIZE;
+    return mapa[celda_y][celda_x] == 0;
+}
+
 
 int main() {
-
   inGame = 0;
 
   windowConfig();
@@ -167,7 +234,11 @@ int main() {
   loadFonts();
   loadButtons();
 
+  // Cargar mapa
+  cargar_mapa("mapa.txt");
 
+  sfVector2f pacman_pos = {304, 256}; // Posición inicial de Pac-Man
+  sfClock *clock = sfClock_create();
 
   while (sfRenderWindow_isOpen(window)) {
       // Detectar posicion del mouse
@@ -183,6 +254,7 @@ int main() {
       // Dibujar el fondo
       sfRenderWindow_drawSprite(window, fondoMenu, NULL);
 
+
       if (inGame == 0) {
         // Dibujar el menú con botones
         sfRenderWindow_drawRectangleShape(window, playButton, NULL);
@@ -190,13 +262,66 @@ int main() {
         sfRenderWindow_drawRectangleShape(window, exitButton, NULL);
         sfRenderWindow_drawText(window, exitText, NULL);
       } else if (inGame == 1) {
-      sfRenderWindow_clear(window, sfBlack);
+        sfRenderWindow_clear(window, sfBlack);
         sfRenderWindow_display(window); // Actualizar ventana en negro
-        sfSleep(sfSeconds(1.0)); // Esperar 1 segundo
+   
         inGame = 2; // Cambiar al estado de mostrar la nueva imagen
       } else if (inGame == 2) {
         //Dibujar solo el fondo del juego          
         sfRenderWindow_drawSprite(window, fondoMapa, NULL);
+        
+        // Dibuja a Pac-Man
+        sfCircleShape *pacman = sfCircleShape_create();
+        sfCircleShape_setRadius(pacman, 16);
+        sfCircleShape_setOrigin(pacman, (sfVector2f){16, 16});
+        sfCircleShape_setPosition(pacman, pacman_pos);
+        sfCircleShape_setFillColor(pacman, sfYellow);
+        sfRenderWindow_drawCircleShape(window, pacman, NULL);
+        sfCircleShape_destroy(pacman);
+
+        // Comprueba si ha pasado el tiempo necesario
+        // Mueve a Pac-Man continuamente en la última dirección presionada
+        if (sfTime_asSeconds(sfClock_getElapsedTime(clock)) >= PACMAN_SPEED) {
+            // Detecta la última tecla presionada y actualiza la próxima dirección
+            if (sfKeyboard_isKeyPressed(sfKeyRight))
+                proxima_direccion = RIGHT;
+            else if (sfKeyboard_isKeyPressed(sfKeyLeft))
+                proxima_direccion = LEFT;
+            else if (sfKeyboard_isKeyPressed(sfKeyUp))
+                proxima_direccion = UP;
+            else if (sfKeyboard_isKeyPressed(sfKeyDown))
+                proxima_direccion = DOWN;
+
+            // Verifica si puede cambiar a la próxima dirección en una intersección
+            if (proxima_direccion == RIGHT && es_camino_libre(pacman_pos.x + CELL_SIZE, pacman_pos.y))
+                direccion = proxima_direccion;
+            else if (proxima_direccion == LEFT && es_camino_libre(pacman_pos.x - CELL_SIZE, pacman_pos.y))
+                direccion = proxima_direccion;
+            else if (proxima_direccion == UP && es_camino_libre(pacman_pos.x, pacman_pos.y - CELL_SIZE))
+                direccion = proxima_direccion;
+            else if (proxima_direccion == DOWN && es_camino_libre(pacman_pos.x, pacman_pos.y + CELL_SIZE))
+                direccion = proxima_direccion;
+
+            // Mueve a Pac-Man según la dirección actual
+            if (direccion == RIGHT && es_camino_libre(pacman_pos.x + CELL_SIZE, pacman_pos.y)) {
+                pacman_pos.x += CELL_SIZE;
+                if (pacman_pos.x > 597)  // Teletransporte al borde izquierdo
+                    pacman_pos.x = 0;
+            }
+            else if (direccion == LEFT && es_camino_libre(pacman_pos.x - CELL_SIZE, pacman_pos.y)) {
+                pacman_pos.x -= CELL_SIZE;
+                if (pacman_pos.x < 1)  // Teletransporte al borde derecho
+                    pacman_pos.x = 597;
+            }
+            else if (direccion == UP && es_camino_libre(pacman_pos.x, pacman_pos.y - CELL_SIZE))
+                pacman_pos.y -= CELL_SIZE;
+            else if (direccion == DOWN && es_camino_libre(pacman_pos.x, pacman_pos.y + CELL_SIZE))
+                pacman_pos.y += CELL_SIZE;
+
+            // printf("Posición de Pac-Man: X = %.0f, Y = %.0f\n", pacman_pos.x, pacman_pos.y);  // Imprimir posición actual
+
+            sfClock_restart(clock); // Reinicia el reloj
+        }
       }
 
       // Mostrar la ventana
