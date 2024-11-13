@@ -19,7 +19,7 @@ sfVector2i mousePos;
 sfFloatRect playBounds;
 sfFloatRect exitBounds;
 
-sfVector2f pacman_pos = {304, 256}; // Posición inicial de Pac-Man
+sfVector2f pacman_pos = {300, 638}; // Posición inicial de Pac-Man
 sfIntRect frame_rect = {0, 0, 32, 32};
 
 #define CELL_SIZE 2
