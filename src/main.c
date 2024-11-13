@@ -10,11 +10,13 @@ sfVector2u windowSize;
 sfTexture* mapBackground;
 sfSprite* fondoMapa;
 sfVector2u sizeMapa;
-sfFont* font;
+sfFont* menuFont;
+sfFont* scoreFont;
 sfRectangleShape* playButton;
 sfText* playText;
 sfRectangleShape* exitButton;
 sfText* exitText;
+sfText* scoreText;
 sfVector2i mousePos;
 sfFloatRect playBounds;
 sfFloatRect exitBounds;
@@ -47,7 +49,7 @@ Direccion proxima_direccion = NONE;
 // Mapa del juego
 int mapa[ROWS][COLS];
 
-int inGame;
+int inGame, puntos, vidas;
 float scaleY, scaleX, scaleYMap, scaleXMap;
 
 int windowConfig() {
@@ -100,8 +102,9 @@ int loadBackgroundMap() {
 
 int loadFonts() {
   // Configuración de fuentes y colores
-  font = sfFont_createFromFile("pacfont.ttf");  // Cargar la fuente
-  if (!font) {
+  menuFont = sfFont_createFromFile("pacfont.ttf");  
+  scoreFont = sfFont_createFromFile("pixel.ttf");  
+  if (!menuFont || !scoreFont) {
       sfRenderWindow_destroy(window);
       return 1;
   }
@@ -119,7 +122,7 @@ void loadButtons() {
   // Configurar botón "Jugar"
   playText = sfText_create();
   sfText_setString(playText, "Jugar");
-  sfText_setFont(playText, font);
+  sfText_setFont(playText, menuFont);
   sfText_setCharacterSize(playText, 50);
   sfText_setPosition(playText, (sfVector2f){windowSize.x / 2 - 115, 200});  // Posición del botón "Jugar"
 
@@ -134,7 +137,7 @@ void loadButtons() {
   // Configurar botón "Salir"
   exitText = sfText_create();
   sfText_setString(exitText, "Salir");
-  sfText_setFont(exitText, font);
+  sfText_setFont(exitText, menuFont);
   sfText_setCharacterSize(exitText, 50);
   sfText_setPosition(exitText, (sfVector2f){windowSize.x / 2 - 95, 323});  // Posición del botón "Salir
 }
@@ -231,6 +234,8 @@ sfBool es_camino_libre(int x, int y) {
 
 int main() {
   inGame = 0;
+  puntos = 0;
+  vidas = 4;
   windowConfig();
   loadBackgroundMenu();
   loadBackgroundMap();
@@ -239,8 +244,18 @@ int main() {
 
   // Cargar mapa
   cargar_mapa("mapa.txt");
+
+  char puntos_texto[20];
+  sprintf(puntos_texto, "Puntos: %d", puntos);
+  scoreText = sfText_create();
+  sfText_setString(scoreText, puntos_texto);
+  sfText_setFont(scoreText, scoreFont);
+  sfText_setColor(scoreText, sfWhite);
+  sfText_setCharacterSize(scoreText, 30);
+  sfText_setPosition(scoreText, (sfVector2f){20, 40});
+
   
-  sfClock *clock = sfClock_create();
+  sfClock *pacman_movement_clock= sfClock_create();
 
   sfTexture* pacman_texture = sfTexture_createFromFile("pacman-sprite.png", NULL);
   if (!pacman_texture) {
@@ -255,7 +270,7 @@ int main() {
    
   int current_frame = 0;
 
-  sfClock* animation_clock = sfClock_create();
+  sfClock* pacman_animation_clock = sfClock_create();
 
 
   while (sfRenderWindow_isOpen(window)) {
@@ -316,11 +331,22 @@ int main() {
           }
       }
 
+      // Crear el texto del puntaje
+      sfRenderWindow_drawText(window, scoreText, NULL);
+
+
       // Verifica si Pac-Man está en una celda con una orbe
       int pacman_x = pacman_pos.x / CELL_SIZE;
       int pacman_y = pacman_pos.y / CELL_SIZE;
 
-      if (mapa[pacman_y][pacman_x] == 2 || mapa[pacman_y][pacman_x] == 3) {
+      if (mapa[pacman_y][pacman_x] == 2) {
+        // Pacman come orbe chica y suma puntos
+        puntos += 10;
+        sprintf(puntos_texto, "Puntos: %d", puntos);  // Actualizar el texto de puntos
+        sfText_setString(scoreText, puntos_texto);
+        mapa[pacman_y][pacman_x] = 0;
+      } else if (mapa[pacman_y][pacman_x] == 3) {
+        // Pacman come orbe grande y adquire inmunidad
         mapa[pacman_y][pacman_x] = 0;
       }
       
@@ -348,7 +374,7 @@ int main() {
 
       // Comprueba si ha pasado el tiempo necesario
       // Mueve a Pac-Man continuamente en la última dirección presionada
-      if (sfTime_asSeconds(sfClock_getElapsedTime(clock)) >= PACMAN_SPEED) {
+      if (sfTime_asSeconds(sfClock_getElapsedTime(pacman_movement_clock)) >= PACMAN_SPEED) {
           pacman_moviendose = 0;
           // Detecta la última tecla presionada y actualiza la próxima dirección
           if (sfKeyboard_isKeyPressed(sfKeyRight))
@@ -396,16 +422,16 @@ int main() {
 
           // printf("Posición de Pac-Man: X = %.0f, Y = %.0f\n", pacman_pos.x, pacman_pos.y);  // Imprimir posición actual
 
-          sfClock_restart(clock); // Reinicia el reloj
+          sfClock_restart(pacman_movement_clock); // Reinicia el reloj
       }
 
       if (pacman_moviendose) {
         // Actualización de la animación
-        if (sfTime_asSeconds(sfClock_getElapsedTime(animation_clock)) >= ANIMATION_SPEED) {
-            current_frame = (current_frame + 1) % 3;  // Ciclo de animación
-            frame_rect.left = current_frame * 32;
-            sfSprite_setTextureRect(pacman, frame_rect);
-            sfClock_restart(animation_clock);  // Reinicia el reloj de animación
+        if (sfTime_asSeconds(sfClock_getElapsedTime(pacman_animation_clock)) >= ANIMATION_SPEED) {
+          current_frame = (current_frame + 1) % 3;  // Ciclo de animación
+          frame_rect.left = current_frame * 32;
+          sfSprite_setTextureRect(pacman, frame_rect);
+          sfClock_restart(pacman_animation_clock);  // Reinicia el reloj de animación
         }
       }
     }
@@ -418,6 +444,7 @@ int main() {
   sfSprite_destroy(fondoMenu);
   sfText_destroy(playText);
   sfText_destroy(exitText);
+  sfText_destroy(scoreText);
   sfRectangleShape_destroy(playButton);
   sfRectangleShape_destroy(exitButton);
   sfSprite_destroy(pacman);
