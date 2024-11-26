@@ -1,5 +1,12 @@
 #include <SFML/Graphics.h>
 #include <stdio.h>
+#include <time.h>
+#include <stdlib.h>
+#include <SFML/System.h>
+#include <SFML/Audio.h>
+#include <SFML/Audio/Sound.h>
+#include <SFML/Audio/Music.h>
+
 
 sfVideoMode mode = {600, 800, 32};
 sfRenderWindow* window;
@@ -20,15 +27,37 @@ sfText* scoreText;
 sfVector2i mousePos;
 sfFloatRect playBounds;
 sfFloatRect exitBounds;
+sfMusic* music1;
+sfTexture* blue;
+sfSprite* inky;
+sfTexture* red;
+sfSprite* blinky;
+sfTexture* pink;
+sfSprite* pinky;
+sfTexture* orange;
+sfSprite* clyde; 
+sfTexture* atrapado;
+sfSprite* chase;
+sfTexture* perdiste;
+sfSprite* gameOver;
+sfText* lifeText;
+
+
+
 
 sfVector2f pacman_pos = {300, 638}; // Posición inicial de Pac-Man
-sfIntRect frame_rect = {0, 0, 32, 32};
+sfVector2f blue_pos = {352, 450}; //posicion inicial del fantasma azul
+sfVector2f pink_pos = {258, 450}; // posicion inicial del fantasma rosa
+sfVector2f orange_pos = {306, 450}; //posicion inicial del fantasma naranja
+sfVector2f red_pos = {304, 386}; //posicion inicial del fantasma rojo
+sfIntRect frame_rect = {0, 0, 32, 32}; 
 
 #define CELL_SIZE 2
 #define ROWS 400
 #define COLS 300
 
 #define PACMAN_SPEED 0.015
+#define GHOST_SPEED 0.1
 
 #define ANIMATION_SPEED 0.1f
 
@@ -45,12 +74,14 @@ typedef enum {
 Direccion direccion = NONE;
 Direccion pacman_sprite_direccion = NONE;
 Direccion proxima_direccion = NONE;
+Direccion direccion_fantasma = NONE;
+Direccion proxima_direccion_red =  NONE;
 
 // Mapa del juego
 int mapa[ROWS][COLS];
 
 int inGame, puntos, vidas;
-float scaleY, scaleX, scaleYMap, scaleXMap;
+float scaleY, scaleX, scaleYMap, scaleXMap, scaleYEnd, scaleXEnd;
 
 int windowConfig() {
   // Crear la ventana
@@ -100,6 +131,27 @@ int loadBackgroundMap() {
   sfSprite_setScale(fondoMapa, (sfVector2f){scaleXMap, scaleYMap});
 }
 
+int loadBackgroundEnd(){
+  //carga la imagen cuando se pierde
+  perdiste = sfTexture_createFromFile("gameover.png", NULL);
+  if (!perdiste){
+    sfRenderWindow_destroy(window);
+    return 1;
+  }
+
+  gameOver = sfSprite_create();
+  sfSprite_setTexture(gameOver, perdiste, sfTrue);
+
+  textureSize = sfTexture_getSize(perdiste);
+  windowSize = sfRenderWindow_getSize(window);
+
+  scaleXEnd = (float)windowSize.x / textureSize.x;
+  scaleYEnd = (float)windowSize.y / textureSize.y;
+  sfSprite_setScale(gameOver, (sfVector2f){scaleXEnd, scaleYEnd});
+}
+
+
+
 int loadFonts() {
   // Configuración de fuentes y colores
   menuFont = sfFont_createFromFile("pacfont.ttf");  
@@ -109,6 +161,9 @@ int loadFonts() {
       return 1;
   }
 }
+
+
+
 
 void loadButtons() {
   // Configurar el fondo del botón "Jugar"
@@ -231,20 +286,31 @@ sfBool es_camino_libre(int x, int y) {
     return mapa[celda_y][celda_x] == 0 || mapa[celda_y][celda_x] == 2 || mapa[celda_y][celda_x] == 3;
 }
 
+// Funcion para verificar si una celda es un camino libre para los fantasmas
+sfBool es_camino_libre_fantasma(int x, int y){
+    int celda_x = x / CELL_SIZE;
+    int celda_y = y / CELL_SIZE;
+    return mapa[celda_y][celda_x] == 0 || mapa[celda_y][celda_x] == 2 || mapa[celda_y][celda_x] == 3 || mapa[celda_y][celda_x] == 8;
+}
 
 int main() {
   inGame = 0;
   puntos = 0;
-  vidas = 4;
+  vidas = 3;
   windowConfig();
   loadBackgroundMenu();
   loadBackgroundMap();
+  loadBackgroundEnd();
   loadFonts();
   loadButtons();
+  /*music1 = sfMusic_createFromFile("inicio.wav");
+  if (!music1){
+    return EXIT_FAILURE;
+  } */
 
+  //sfMusic_play (music1);
   // Cargar mapa
   cargar_mapa("mapa.txt");
-
   char puntos_texto[20];
   sprintf(puntos_texto, "Puntos: %d", puntos);
   scoreText = sfText_create();
@@ -253,9 +319,18 @@ int main() {
   sfText_setColor(scoreText, sfWhite);
   sfText_setCharacterSize(scoreText, 30);
   sfText_setPosition(scoreText, (sfVector2f){20, 40});
+  char vidas_texto[20];
+  sprintf(vidas_texto, "Vidas: %d", vidas);
+  lifeText = sfText_create();
+  sfText_setString(lifeText,vidas_texto);
+  sfText_setFont(lifeText, scoreFont);
+  sfText_setColor(lifeText, sfWhite);
+  sfText_setCharacterSize(lifeText, 30);
+  sfText_setPosition(lifeText, (sfVector2f){20,80});
 
   
   sfClock *pacman_movement_clock= sfClock_create();
+  sfClock *ghost_movement_clock= sfClock_create();
 
   sfTexture* pacman_texture = sfTexture_createFromFile("pacman-sprite.png", NULL);
   if (!pacman_texture) {
@@ -272,6 +347,57 @@ int main() {
 
   sfClock* pacman_animation_clock = sfClock_create();
 
+
+
+  sfTexture* blue = sfTexture_createFromFile("ghost-blue.png", NULL);
+  if (!blue) {
+    return 1;
+  }
+
+  sfSprite* inky = sfSprite_create();
+  sfSprite_setTexture(inky, blue, sfTrue);
+  sfSprite_setOrigin(inky, (sfVector2f){20, 20});
+  sfSprite_setTexture(inky, blue, sfTrue);
+
+  sfTexture* red = sfTexture_createFromFile("ghost-red.png", NULL);
+  if (!red){
+    return 1;
+  }
+
+  sfSprite* blinky = sfSprite_create();
+  sfSprite_setTexture(blinky, red, sfTrue);
+  sfSprite_setOrigin(blinky, (sfVector2f){20, 20});
+  sfSprite_setTexture(blinky, red, sfTrue);
+
+  sfTexture* pink = sfTexture_createFromFile("ghost-pink.png", NULL);
+  if (!pink){
+    return 1;
+  }
+
+  sfSprite* pinky =sfSprite_create();
+  sfSprite_setTexture(pinky, pink, sfTrue);
+  sfSprite_setOrigin(pinky, (sfVector2f){20 ,20});
+  sfSprite_setTexture(pinky, pink, sfTrue);
+
+  sfTexture* orange =sfTexture_createFromFile("ghost-orange.png", NULL);
+  if (!orange){
+    return 1;
+  }
+
+  sfSprite* clyde =sfSprite_create();
+  sfSprite_setTexture(clyde, orange, sfTrue);
+  sfSprite_setOrigin(clyde, (sfVector2f){20, 20});
+  sfSprite_setTexture(clyde, orange, sfTrue);
+
+  sfTexture* atrapado =sfTexture_createFromFile("ghost-chase.png", NULL);
+  if (!atrapado){
+    return 1;
+  }
+
+  sfSprite* chase= sfSprite_create();
+  sfSprite_setTexture(chase, atrapado, sfTrue);
+  sfSprite_setOrigin(chase, (sfVector2f){20,20});
+  sfSprite_setTexture(chase, atrapado, sfTrue);
 
   while (sfRenderWindow_isOpen(window)) {
     // Detectar posicion del mouse
@@ -333,6 +459,7 @@ int main() {
 
       // Crear el texto del puntaje
       sfRenderWindow_drawText(window, scoreText, NULL);
+      sfRenderWindow_drawText(window, lifeText, NULL);
 
 
       // Verifica si Pac-Man está en una celda con una orbe
@@ -357,6 +484,22 @@ int main() {
       // Variable para verificar si Pac-Man está en movimiento
       int pacman_moviendose = 0;
       
+      //dibuja fantasma azul
+      sfSprite_setPosition(inky, blue_pos);
+      sfRenderWindow_drawSprite(window, inky, NULL);
+
+      //dibuja fantasma rojo
+      sfSprite_setPosition(blinky, red_pos);
+      sfRenderWindow_drawSprite(window, blinky, NULL);
+
+      //dibuja fantasma rosado
+      sfSprite_setPosition(pinky, pink_pos);
+      sfRenderWindow_drawSprite(window, pinky, NULL);
+
+      //dibuja fantasma naranja
+      sfSprite_setPosition(clyde, orange_pos);
+      sfRenderWindow_drawSprite(window, clyde, NULL);    
+
 
       if (pacman_sprite_direccion == NONE || pacman_sprite_direccion == RIGHT) {
         sfSprite_setRotation(pacman, 0);
@@ -377,14 +520,22 @@ int main() {
       if (sfTime_asSeconds(sfClock_getElapsedTime(pacman_movement_clock)) >= PACMAN_SPEED) {
           pacman_moviendose = 0;
           // Detecta la última tecla presionada y actualiza la próxima dirección
-          if (sfKeyboard_isKeyPressed(sfKeyRight))
+          if (sfKeyboard_isKeyPressed(sfKeyRight)){
               proxima_direccion = RIGHT;
-          else if (sfKeyboard_isKeyPressed(sfKeyLeft))
+              proxima_direccion_red = RIGHT;
+          }
+          else if (sfKeyboard_isKeyPressed(sfKeyLeft)){
               proxima_direccion = LEFT;
-          else if (sfKeyboard_isKeyPressed(sfKeyUp))
+              proxima_direccion_red = LEFT;
+          }
+          else if (sfKeyboard_isKeyPressed(sfKeyUp)){
               proxima_direccion = UP;
-          else if (sfKeyboard_isKeyPressed(sfKeyDown))
-              proxima_direccion = DOWN;
+              proxima_direccion_red = UP;
+          }
+          else if (sfKeyboard_isKeyPressed(sfKeyDown)){
+              proxima_direccion = DOWN; 
+              proxima_direccion_red = DOWN;
+          }
 
           // Verifica si puede cambiar a la próxima dirección en una intersección
           if (proxima_direccion == RIGHT && es_camino_libre(pacman_pos.x + CELL_SIZE, pacman_pos.y))
@@ -395,6 +546,17 @@ int main() {
               direccion = proxima_direccion;
           else if (proxima_direccion == DOWN && es_camino_libre(pacman_pos.x, pacman_pos.y + CELL_SIZE))
               direccion = proxima_direccion;
+
+          if (proxima_direccion_red == RIGHT && es_camino_libre_fantasma (red_pos.x + CELL_SIZE, red_pos.y)) //mov der
+              direccion_fantasma = proxima_direccion_red;
+          else if (proxima_direccion_red == LEFT && es_camino_libre_fantasma (red_pos.x - CELL_SIZE, red_pos.y)) // mov izq
+              direccion_fantasma = proxima_direccion_red;
+          else if (proxima_direccion_red == UP && es_camino_libre_fantasma (red_pos.x, red_pos.y - CELL_SIZE)) //mov arr
+              direccion_fantasma = proxima_direccion_red;
+          else if (proxima_direccion_red == DOWN && es_camino_libre_fantasma (red_pos.x, red_pos.y + CELL_SIZE)) //mov abj
+              direccion_fantasma = proxima_direccion_red;     
+
+
 
           // Mueve a Pac-Man según la dirección actual
           if (direccion == RIGHT && es_camino_libre(pacman_pos.x + CELL_SIZE, pacman_pos.y)) {
@@ -420,10 +582,31 @@ int main() {
               pacman_moviendose = 1;
           }
 
+          //Mueve a red según la dirección actual
+          if (proxima_direccion_red == RIGHT  && es_camino_libre_fantasma (red_pos.x + CELL_SIZE, red_pos.y)) {
+              red_pos.x += CELL_SIZE;
+              if (red_pos.x > 597)  // Teletransporte al borde izquierdo
+                  red_pos.x = 0;
+          }
+          else if (proxima_direccion_red == LEFT  && es_camino_libre_fantasma(red_pos.x - CELL_SIZE, red_pos.y)) {
+              red_pos.x -= CELL_SIZE;
+            if (red_pos.x < 1)  // Teletransporte al borde derecho
+              red_pos.x = 597;
+          } 
+          else if (proxima_direccion_red == UP && es_camino_libre_fantasma(red_pos.x, red_pos.y - CELL_SIZE)) {
+              red_pos.y -= CELL_SIZE;
+          } 
+          else if (direccion_fantasma == DOWN  && es_camino_libre_fantasma(red_pos.x, red_pos.y + CELL_SIZE)) {
+              red_pos.y += CELL_SIZE;
+          }         
+
+
           // printf("Posición de Pac-Man: X = %.0f, Y = %.0f\n", pacman_pos.x, pacman_pos.y);  // Imprimir posición actual
 
           sfClock_restart(pacman_movement_clock); // Reinicia el reloj
+          sfClock_restart(ghost_movement_clock);
       }
+      
 
       if (pacman_moviendose) {
         // Actualización de la animación
@@ -434,8 +617,15 @@ int main() {
           sfClock_restart(pacman_animation_clock);  // Reinicia el reloj de animación
         }
       }
-    }
 
+      if (puntos == 2400){
+        inGame=3;
+      }
+    }
+    else if (inGame == 3){
+      sfRenderWindow_drawSprite(window, gameOver, NULL);
+    }
+    
     // Mostrar la ventana
     sfRenderWindow_display(window);
   }
@@ -448,5 +638,12 @@ int main() {
   sfRectangleShape_destroy(playButton);
   sfRectangleShape_destroy(exitButton);
   sfSprite_destroy(pacman);
+  sfSprite_destroy(inky);
+  sfSprite_destroy(blinky);
+  sfSprite_destroy(pinky);
+  sfSprite_destroy(clyde);
+  sfSprite_destroy(chase);
   sfRenderWindow_destroy(window);
+ // sfMusic_destroy(music1);
 }
+
